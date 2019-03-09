@@ -49,7 +49,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
 
     // Use mxnet's CHECK_EQ to do assertions.
     // Remove this assertion when you do your implementation!
-    CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
+    // CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
 
     // Extract the tensor dimensions into B,M,C,H,W,K
     // ...
