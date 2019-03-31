@@ -58,12 +58,12 @@ Download the rai binary for your platform.
 You will probably use it for development, and definitely use it for submission.
 
 
-| Operating System | Architecture | New rai client (Version: 0.3.1-ece408) | Stable Version (0.3.0) Link (OLD)                                                        |
+| Operating System | Architecture | New rai client, with submit support | Old Version, no submit support (Version: 0.3.1-ece408)                                                        |
 | ---------------- | ------------ | ---------------------------------------| -----------------------------------------------------------------------------------------|
-| Linux            | amd64        | [URL](https://drive.google.com/open?id=1_QqqZUeXtkLYZca0wqP4PdmB0Omcw-W9)  | [URL](http://files.rai-project.com/dist/rai/stable/latest/linux-amd64.tar.gz)            |
-| Arch Linux       | amd64        | [URL](https://drive.google.com/open?id=145ZSHq04BtAcwG-eaCy3YunAOvp9KUrV)  | -                                                    |
-| OSX/Darwin       | amd64        | [URL](https://drive.google.com/open?id=1l912xvVitXiYCluccTRIKFf3tw2IqmkB)  | [URL](http://files.rai-project.com/dist/rai/stable/latest/darwin-amd64.tar.gz)           |
-| Windows          | amd64        | [URL](https://drive.google.com/open?id=1F5ccWZSTGdoshXl9k6OEW6OnNAC0HMFu)  | [URL](http://files.rai-project.com/dist/rai/stable/latest/windows-amd64.tar.gz)          |
+| Linux            | amd64        | [URL](https://drive.google.com/drive/folders/1IHbg6nlDBPHimGjtkWhOmoZEPzeam--W)  | [URL](https://drive.google.com/open?id=1_QqqZUeXtkLYZca0wqP4PdmB0Omcw-W9)   |
+| Arch Linux       | amd64        | -  | [URL](https://drive.google.com/open?id=145ZSHq04BtAcwG-eaCy3YunAOvp9KUrV)   |
+| OSX/Darwin       | amd64        | [URL](https://drive.google.com/drive/folders/1P7LtcCC6VOp5wrNF8FSM5gONvM99mIZC)  | [URL](https://drive.google.com/open?id=1l912xvVitXiYCluccTRIKFf3tw2IqmkB)   |
+| Windows          | amd64        | -  | [URL](https://drive.google.com/open?id=1F5ccWZSTGdoshXl9k6OEW6OnNAC0HMFu)   |
 
 You should have received a `.rai_profile` file by email.
 Put that file in `~/.rai_profile` (Linux/macOS) or `%HOME%/.rai_profile` (Windows).
@@ -201,7 +201,7 @@ Modify `ece408_src/new-forward.h` to implement the forward convolution described
 The performance of the CPU convolution is not part of the project evaluation.
 The algorithm is also below, for your convenience
 
-    for b = 0 .. B)                    // for each image in the batch 
+    for b = 0 .. B                     // for each image in the batch 
         for m = 0 .. M                 // for each output feature maps
             for h = 0 .. H_out         // for each output element
                 for w = 0 .. W_out
@@ -239,9 +239,9 @@ You can time the whole program execution by modifying `rai_build.yml` with
 
 `m2.1.py` takes one optional argument: the dataset size.  
 If the correctness for each possible model is as below, you can be reasonably confident your implementation is right.
-The correctness does depend on the data size. Check your correctness on the full data size of 10000.
+The correctness does depend on the data size. 
 
-For example, you could modify `rai_build.yml` to run
+For example, to check your correctness on the full data size of 10000, you could modify `rai_build.yml` to run
 
     python m2.1.py 10000
 
@@ -289,7 +289,7 @@ When it is correct, it will show the same correctness as Milestone 2.
 
 First, ensure you are using correct image in rai_build.yml file
 
-`image: illinoisimpact/ece408_mxnet_docker:amd64-gpu-latest`
+`image: illinoisimpact/ece408_mxnet_docker_2019sp:amd64-gpu-latest`
 
 Modify `rai_build.yml` to use nvprof to save some timeline and analysis information, as described in [nvprof](#profiling).
 Use the NVIDIA Visual Profiler to find the execution of your kernel, and show it in your report.
@@ -571,8 +571,8 @@ The training dataset is a modified version of the mxnet dataset. The scripts to 
     pip3 install --user numpy scikit-image
     mkdir -p fashion-mnist
     wget -P fashion-mnist \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/generate-data.py \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/reader.py
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/generate-data.py \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/reader.py
 
 Run the generation script. It will download the fashion-mnist dataset and resize it, which may take a few minutes and consume a few hundred megabytes of disk space
 
@@ -583,27 +583,27 @@ Download the trained models (for the existing MXNet implementation and your impl
 
     mkdir -p models \
     && wget -P models \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/models/baseline-0002.params \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/models/baseline-symbol.json \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/models/ece408-002.params \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/models/ece408-symbol.json
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/models/baseline-0002.params \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/models/baseline-symbol.json \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/models/ece408-002.params \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/models/ece408-symbol.json
 
 Download the scripts we use for evaluation (needs to be modified to use 74x74 input image size)
 
     wget \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/m1.1.py \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/m1.2.py \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/m2.1.py \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/m3.1.py \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/scripts/m4.1.py
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/m1.1.py \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/m1.2.py \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/m2.1.py \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/m3.1.py \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/scripts/m4.1.py
 
 
 Download the skeleton source files into incubator-mxnet. This is also where you will put the skeleton code from `ece408_src`.
 
     wget -P incubator-mxnet/src/operator/custom \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/ece408_src/new.cc \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/ece408_src/new.cu \
-        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2018sp/ece408_src/new-inl.h
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/ece408_src/new.cc \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/ece408_src/new.cu \
+        https://github.com/illinois-impact/ece408_mxnet_docker/raw/2019sp/ece408_src/new-inl.h
 
 Modify the python forward convolution scripts to point to where you downloaded fashion-mnist
 
