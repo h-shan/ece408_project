@@ -57,7 +57,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int W = x.shape[3];  // Output width (x)
     const int K = w.shape[3];  // Filter Width/Height
 
-    #define TILE_SIZE = 16
+    #define TILE_SIZE 16
 
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
