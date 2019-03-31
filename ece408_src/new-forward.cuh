@@ -59,8 +59,13 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
 
     #define TILE_SIZE = 16
 
+    const int H_out = H - K + 1;
+    const int W_out = W - K + 1;
+
+    Z = (W_out / TILE_SIZE) * (H_out / TILE_SIZE);
+
     // Set the kernel dimensions
-    dim3 gridDim(ceil(W / TILE_SIZE), ceil(H / TILE_SIZE), 1);
+    dim3 gridDim(B, M, Z);
     dim3 blockDim(TILE_SIZE, TILE_SIZE, 1);
 
     // Call the kernel
