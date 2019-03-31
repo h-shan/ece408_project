@@ -52,7 +52,12 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
 
     // Extract the tensor dimensions into B,M,C,H,W,K
-    // ...
+    const int B = x.shape_[0];  // Batch Size
+    const int M = y.shape_[1];  // Output Channels (Feature Maps)
+    const int C = x.shape_[1];  // Input Channels (Feature Maps) 
+    const int H = x.shape[2];  // Output height
+    const int W = x.shape[3];  // Output width
+    const int K = w.shape[3];  // Filter Width/Height
 
     // Set the kernel dimensions
     // dim3 gridDim(0);
