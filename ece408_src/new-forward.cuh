@@ -3,7 +3,6 @@
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 
 #include <mxnet/base.h>
-#include <stdio.h>
 
 namespace mxnet
 {
@@ -38,7 +37,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     extern __shared__ float shmem[];
     float* X_shared = &shmem[0];
     float* W_shared = &shmem[X_tile_width * X_tile_width];
-    const int W_grid = W_out/TILE_SIZE; // number of horizontal tiles per output map
+    const int W_grid = ceil((W_out + 0.0) / TILE_SIZE); // number of horizontal tiles per output map
     n = blockIdx.x;
     m = blockIdx.y;
     h0 = threadIdx.x;
@@ -55,24 +54,23 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
         W_shared[h0 * K + w0]= k4d(m, c, h0, w0);
       }
       __syncthreads();
-   // load tile from X[n, c,…] into shared memory
 
       for (int i = h; i < h_base + X_tile_width; i += TILE_SIZE) {
         for (int j = w; j < w_base + X_tile_width; j += TILE_SIZE) {
-          X_shared[(i - h_base) * X_tile_width + j - w_base] = x4d(n, c, h, w);
+          if (i < H && j < W) {
+            X_shared[(i - h_base) * X_tile_width + j - w_base] = x4d(n, c, i, j);
+          }
         }
       }
       __syncthreads();
       for (p = 0; p < K; p++) {
         for (q = 0; q < K; q++) {
-          if (h0 + p < X_tile_width && w0 + q < X_tile_width) {
-            acc = acc + X_shared[(h0 + p) * X_tile_width + w0 + q] * W_shared[p * K + q];
-          }
+          acc = acc + X_shared[(h0 + p) * X_tile_width + w0 + q] * W_shared[p * K + q];
         }
       }
       __syncthreads();
     }
-    if (h < H && w < W) {
+    if (h < H_out && w < W_out) {
       y4d(n, m, h, w) = acc; 
     }
 
@@ -104,11 +102,8 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
 
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-
-    printf("B: %d\nM: %d\nC: %d\nH: %d\nW: %d\nK: %d\n", B, M, C, H, W, K);
-    
     const int Z = ceil((W_out + 0.0) / TILE_SIZE) * ceil((H_out + 0.0)/ TILE_SIZE);
-    // const int Z = (W_out / TILE_SIZE) * (H_out / TILE_SIZE);
+   // const int Z = (W_out / TILE_SIZE) * (H_out / TILE_SIZE);
     
     // Set the kernel dimensions
     dim3 gridDim(B, M, Z);
