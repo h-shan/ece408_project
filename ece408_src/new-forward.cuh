@@ -80,28 +80,27 @@ __global__ void forward_kernel_original(float *y, const float *x, const float *k
 {
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
-    const int W_grid = ceil((W_out + 0.0) / TILE_SIZE); // number of horizontal tiles per output map
     #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
     #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
     #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
 
-    int n, m, h, w, c, p, q;
-    n = blockIdx.x;
-    m = blockIdx.y;
-    h = blockIdx.z / W_grid + threadIdx.y;
-    w = blockIdx.z % W_grid + threadIdx.x;
-    
-    if (h >= H_out || w >= W_out) {
-       return;
-    }
-    
-    float acc = 0.;
-    for (c = 0; c < C; c++) { // sum over all input channels
-      for (p = 0; p < K; p++) // loop over KxK filter
-        for (q = 0; q < K; q++)
-          acc += x4d(n, c, h + p, w + q) * k4d(m, c, p, q);
-    }
-    y4d(n, m, h, w) = acc;
+    const int TILE_WIDTH = 16;
+	const int W_grid = ceil(1.*W_out/TILE_WIDTH);
+	const int H_grid = ceil(1.*H_out/TILE_WIDTH);
+
+	int b, m, h, w, c, p, q;
+	b = blockIdx.x;
+	m = blockIdx.y;
+	h = blockIdx.z / W_grid * TILE_WIDTH + threadIdx.y;
+	w = blockIdx.z % W_grid * TILE_WIDTH + threadIdx.x;
+	if (h >= H_out || w >= W_out)
+		return;
+	float acc = 0;
+	for (c = 0; c < C; c++) 
+		for (p = 0; p < K; p++) 
+			for (q = 0; q < K; q++)
+				acc += x4d(b, c, h + p, w + q) * k4d(m, c, p, q);
+	y4d(b, m, h, w) = acc;
 
     #undef y4d
     #undef x4d
