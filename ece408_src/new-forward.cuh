@@ -88,8 +88,8 @@ __global__ void forward_kernel_original(float *y, const float *x, const float *k
     int n, m, h, w, c, p, q;
     n = blockIdx.x;
     m = blockIdx.y;
-    h = blockIdx.z / W_grid + threadIdx.y;
-    w = blockIdx.z % W_grid + threadIdx.x;
+    h = (blockIdx.z / W_grid) * TILE_SIZE + threadIdx.y;
+    w = (blockIdx.z % W_grid) * TILE_SIZE + threadIdx.x;
     
     if (h >= H_out || w >= W_out) {
        return;
@@ -120,7 +120,6 @@ __global__ void forward_kernel_original(float *y, const float *x, const float *k
 template <>
 void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tensor<gpu, 4, float> &x, const mshadow::Tensor<gpu, 4, float> &w)
 {
-
     // Use mxnet's CHECK_EQ to do assertions.
     // Remove this assertion when you do your implementation!
     // CHECK_EQ(0, 1) << "Remove this line and replace with your implementation";
@@ -136,7 +135,6 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int H_out = H - K + 1;
     const int W_out = W - K + 1;
     const int Z = ceil((W_out + 0.0) / TILE_SIZE) * ceil((H_out + 0.0)/ TILE_SIZE);
-   // const int Z = (W_out / TILE_SIZE) * (H_out / TILE_SIZE);
     
     // Set the kernel dimensions
     dim3 gridDim(B, M, Z);
