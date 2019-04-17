@@ -38,7 +38,8 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     int n, m, h0, w0, h_base, w_base, h, w;
     int X_tile_width = TILE_SIZE + K-1;
     extern __shared__ float shmem[];
-    float* X_shared = &shmem[0];
+    float* X_shared1 = &shmem[0];
+    float* X_shared2 = &shmem[X_tile_width * X_tile_width];
     const int W_grid = ceil((W_out + 0.0) / TILE_SIZE); // number of horizontal tiles per output map
     n = blockIdx.x;
     m = blockIdx.y;
@@ -52,6 +53,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     float acc = 0.;
     int c, p, q;
     for (c = 0; c < C; c++) { // sum over all input channels
+      float *X_shared = c % 2 ? X_shared1 : X_shared2;
       for (int i = h; i < h_base + X_tile_width; i += TILE_SIZE) {
         for (int j = w; j < w_base + X_tile_width; j += TILE_SIZE) {
           if (i < H && j < W) {
@@ -62,10 +64,9 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
       __syncthreads();
       for (p = 0; p < K; p++) {
         for (q = 0; q < K; q++) {
-          acc = acc + X_shared[(h0 + p) * X_tile_width + w0 + q] * k4d(m, c, p, q);
+          acc += X_shared[(h0 + p) * X_tile_width + w0 + q] * k4d(m, c, p, q);
         }
       }
-      __syncthreads();
     }
     if (h < H_out && w < W_out) {
       y4d(n, m, h, w) = acc; 
@@ -83,6 +84,7 @@ __global__ void forward_kernel_original(float *y, const float *x, const float *k
     #define y4d(i3, i2, i1, i0) y[(i3) * (M * H_out * W_out) + (i2) * (H_out * W_out) + (i1) * (W_out) + i0]
     #define x4d(i3, i2, i1, i0) x[(i3) * (C * H * W) + (i2) * (H * W) + (i1) * (W) + i0]
     #define k4d(i3, i2, i1, i0) k[(i3) * (C * K * K) + (i2) * (K * K) + (i1) * (K) + i0]
+    const int W_grid = ceil((W_out + 0.0) / TILE_SIZE); // number of horizontal tiles per output map
 
     int n, m, h, w, c, p, q;
     n = blockIdx.x;
@@ -105,10 +107,6 @@ __global__ void forward_kernel_original(float *y, const float *x, const float *k
     #undef x4d
     #undef k4d
 }
-
-
-
-
 
 /* 
    This function is called by new-inl.h
@@ -139,7 +137,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     dim3 blockDim(TILE_SIZE, TILE_SIZE, 1);
 
     cudaMemcpyToSymbol(cst_ptr, w.dptr_, KERNEL_SIZE * KERNEL_SIZE * M * C * sizeof(float), 0, cudaMemcpyDeviceToDevice);
-    size_t shmem_size = sizeof(float) * ( (TILE_SIZE + K-1) * (TILE_SIZE + K-1) + K*K );
+    size_t shmem_size = sizeof(float) * ( (TILE_SIZE + K-1) * (TILE_SIZE + K-1) * 2);
     // Call the kernel
     forward_kernel<<<gridDim, blockDim, shmem_size>>>(y.dptr_, x.dptr_, w.dptr_, B,M,C,H,W,K);
 
