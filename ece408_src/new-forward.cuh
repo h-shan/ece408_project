@@ -64,7 +64,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
       __syncthreads();
       for (p = 0; p < K; p++) {
         for (q = 0; q < K; q++) {
-          acc += x4d(n, c, h + p, w + q) * k4d(m, c, p, q);
+          acc += X_shared[(h0 + p) * X_tile_width + w0 + q] * k4d(m, c, p, q);
         }
       }
     }
