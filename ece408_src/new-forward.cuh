@@ -2,7 +2,7 @@
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 
 #define BLOCK_SIZE 1024
-
+#define TILE 32
 #include <mxnet/base.h>
 
 namespace mxnet
@@ -52,7 +52,76 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
 #undef x4d
 #undef k4d
 }
+__global__ void matrixMultiplyShared(float *A, float *B, float *C, int numAColumns, int numCRows, int numCColumns) 
+{
+  // numARows = numCRows
+  // numBRows = numAColumns
+  // numBColumns = numCColumns
 
+  //@@ Insert code to implement matrix multiplication here
+  //@@ You have to use shared memory for this MP
+  __shared__ float SHAREDA[TILE_WIDTH][TILE_WIDTH];
+  __shared__ float SHAREDB[TILE_WIDTH][TILE_WIDTH];
+  int row = blockIdx.y * blockDim.y + threadIdx.y;
+  int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+  float acc = 0;
+  int width=ceil(1.0*numAColumns/TILE_WIDTH);
+  for (int i= 0; i < width; i++) {
+
+    int j = i*TILE_WIDTH+threadIdx.x;
+    if (j < numAColumns)
+      SHAREDA[threadIdx.y][threadIdx.x] = A[row*numAColumns+j];
+    int l = i*TILE_WIDTH+threadIdx.y;
+    if (l < numAColumns)
+      SHAREDB[threadIdx.y][threadIdx.x] = B[row*numCColumns+l];
+
+    __syncthreads();
+    for (int k = 0; k < TILE_WIDTH; k++)
+       result += tileA[threadIdx.y][k]*tileB[k][threadIdx.x];
+    __syncthreads();   
+  }
+  
+  if ((row < numCRows) && (col < numCColumns)) {
+    C[row*numCColumns+col] = acc;
+  }
+}
+__global__ void unrollKernel(float* X_unrolled, int size, float* X, int C, int K, int H, int W) {
+    int c,s,, h_out, w_out, h_unroll, w_base, p, q;
+     int t=blockIdx.x*CUDA MAX_NUM_THREADS+threadIdx.x;
+     int H_out=H-K+1;
+     int W_out=H-K+1;
+     int W_unroll=H_out*W_out; 
+
+     if(t<C*W_unroll){
+         c=t/W_unroll;
+         s=t%W_unroll; 
+         h_out=s/W_out;
+         w_out=s%W_out; 
+         h_unroll=h_out*W_out+w_out; 
+         w_base=c*K*K;
+         for(p=0; p<K; p++)
+            for(q=0; q<K; q++){
+                w_unroll=w_base+p*K+q;
+                X_unroll[h_unroll+w_unroll]=X(c, h_out+p, w_out+q);
+            }
+     }
+    
+}
+
+void unroll(float* X_unrolled, int size, float* X, int C, int K, int H, int W) {
+    int gridDim = ceil(1.0*size/BLOCK_SIZE);
+    unrollKernel<<<gridDim, BLOCK_SIZE>>>(X_unrolled, size, X, C, K, H, W);
+}
+void launch(float* Kernel, float* X_unrolled,  float* Y, int CKK, int M, int HW) {
+    // matrixMultiplyShared(float *A, float *B, float *C,
+    //                                  int numAColumns, int numCRows, int numCColumns)
+    // W_unroll = K
+    int blockDimX = TILE_WIDTH, blockDimY = TILE_WIDTH;
+    int gridDimY = ceil(1.0*M/blockDimY), gridDimX = ceil(1.0*HW/blockDimX);
+    dim3 gridDim (gridDimX, gridDimY), blockDim (blockDimX, blockDimY);
+    matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X_unrolled, Y, CKK, M, HW);
+}
 /* 
    This function is called by new-inl.h
    Any code you write should be executed by this function.
@@ -78,15 +147,16 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     const int W_out = W - K + 1;
     const int TILE_WIDTH = 16;
 
-	const int W_grid = ceil(1.*W_out/TILE_WIDTH);
-	const int H_grid = ceil(1.*H_out/TILE_WIDTH);
-
-	int Z = H_grid * W_grid;
-	dim3 blockDim(TILE_WIDTH, TILE_WIDTH, 1);
-	dim3 gridDim(B, M, Z);
-
-    forward_kernel<<<gridDim, blockDim>>>(y.dptr_,x.dptr_,k.dptr_, B,M,C,H,W,K);
-
+	float* Ker = k.dptr_;
+    
+    float* X_unrolled;
+    int elements = C*K*K*H_out*W_out;
+    cudaMalloc(&X_unrolled, sizeof(float)*size);
+    for (int b = B; b--; ) {
+        unroll(X_unrolled, elements, X+b*C*H*W, C, K, H, W);
+        launch(Ker,  X_unrolled,  Y+b*M*H_out*W_out,  C*K*K,  M,  H_out*W_out);
+    }
+    cudaFree(X_unrolled);
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 
 }
