@@ -10,7 +10,7 @@ namespace op
 {
 
 
-#define TILE_SIZE 16
+#define TILE_SIZE 8
 #define KERNEL_SIZE 5
 __constant__ float cst_ptr [KERNEL_SIZE * KERNEL_SIZE * 500]; // 50 max number of channels
 
