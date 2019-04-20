@@ -1,0 +1,6 @@
+- Move weight matrix into constant memory, rewrite kernel to compensate
+- Use cudaHostAlloc and the like for DMA requests
+- Asynchronous kernel calls
+- Reduction of convolutional layer to matrix multiply
+- Shared memory convolution
+- GPU unrolling
