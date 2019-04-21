@@ -2,7 +2,7 @@
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 
 #define BLOCK_SIZE 1024
-#define TILE_WIDTH 16
+#define TILE_WIDTH 32
 #define KERNEL_SIZE 14112
 
 #include <mxnet/base.h>
@@ -17,34 +17,39 @@ __constant__ float Kernel[KERNEL_SIZE];
 
 __global__ void matrixMultiplyShared(float *B, float *C, int numAColumns, int numCRows, int numCColumns) 
 {
-  __shared__ float shared[TILE_WIDTH][TILE_WIDTH];
-  int row = blockIdx.y * blockDim.y + threadIdx.y;
-  int col = blockIdx.x * blockDim.x + threadIdx.x;
-  float acc= 0;
-  for (int i = 0; i < ceil(1.0*numAColumns/TILE_WIDTH); i++) {
-    int row = i*TILE_WIDTH+threadIdx.y;
+  __shared__ float tileB[TILE_WIDTH][TILE_WIDTH];
+  int rowIx = blockIdx.y * blockDim.y + threadIdx.y;
+  int colIx = blockIdx.x * blockDim.x + threadIdx.x;
+  float result = 0;
+  for (int tileIx = 0; tileIx < ceil(1.0*numAColumns/TILE_WIDTH); tileIx++) {
+    int row = tileIx*TILE_WIDTH+threadIdx.y;
     if (row < numAColumns)
-      shared[threadIdx.y][threadIdx.x] = B[row*numCColumns + col];
+      tileB[threadIdx.y][threadIdx.x] = B[row*numCColumns + colIx];
+    else 
+      tileB[threadIdx.y][threadIdx.x] = 0;
     __syncthreads();
-    for (int k =0; k < TILE_WIDTH; k++)
-      if (i*TILE_WIDTH+k < numAColumns)
-        acc += Kernel[row*numAColumns+i*TILE_WIDTH+k]*shared[k][threadIdx.x];
+    for (int k = 0; k < TILE_WIDTH; k++)
+      if (tileIx*TILE_WIDTH+k < numAColumns)
+        result += Kernel[rowIx*numAColumns+tileIx*TILE_WIDTH+k]*tileB[k][threadIdx.x];
+      
     __syncthreads();   
   }
-  if ((row < numCRows) && (col < numCColumns)) {
-    C[row*numCColumns+col] = acc;
+  
+  if ((rowIx < numCRows) && (colIx < numCColumns)) {
+    C[rowIx*numCColumns+colIx] = result;
   }
+  
 }
 
 
-void gemm(float* X_unrolled,  float* Y, int C, int M, int H) {
+void gemm(float* X_unrolled,  float* Y, int CKK, int M, int HW) {
     // matrixMultiplyShared(float *A, float *B, float *C,
     //                                  int numAColumns, int numCRows, int numCColumns)
     // W_unroll = K
     int blockDimX = TILE_WIDTH, blockDimY = TILE_WIDTH;
-    int gridDimY = ceil(1.0*M/blockDimY), gridDimX = ceil(1.0*H/blockDimX);
+    int gridDimY = ceil(1.0*M/blockDimY), gridDimX = ceil(1.0*HW/blockDimX);
     dim3 gridDim (gridDimX, gridDimY), blockDim (blockDimX, blockDimY);
-    matrixMultiplyShared<<<gridDim, blockDim>>>(X_unrolled, Y, C, M, H);
+    matrixMultiplyShared<<<gridDim, blockDim>>>(X_unrolled, Y, CKK, M, HW);
 }
 
 
@@ -101,12 +106,14 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
 
 
     float* X_unrolled;
-    cudaMalloc(&X_unrolled, sizeof(float)*C*K*K*H_out*W_out);
-    int b=B;
-    while(b>0) {
-        unroll(X_unrolled, C*K*K*H_out*W_out, X+b*C*H*W, C, K, H, W);
+    int size = C*K*K*H_out*W_out;
+    cudaMalloc(&X_unrolled, sizeof(float)*size);
+    int b =B;
+    while (b>0) {
+        unroll(X_unrolled, size, X+b*C*H*W, C, K, H, W);
         gemm(X_unrolled,  Y+b*M*H_out*W_out,  C*K*K,  M,  H_out*W_out);
         b--;
+        
     }
     cudaFree(X_unrolled);
 
