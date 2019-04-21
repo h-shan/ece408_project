@@ -17,43 +17,22 @@ __constant__ float Kernel[KERNEL_SIZE];
 
 __global__ void matrixMultiplyShared(float *B, float *C, int numAColumns, int numCRows, int numCColumns) 
 {
-  // numARows = numCRows
-  // numBRows = numAColumns
-  // numBColumns = numCColumns
-
-  //@@ Insert code to implement matrix multiplication here
-  //@@ You have to use shared memory for this MP
-  // __shared__ float tileA[TILE_WIDTH][TILE_WIDTH];
   __shared__ float tileB[TILE_WIDTH][TILE_WIDTH];
   int rowIx = blockIdx.y * blockDim.y + threadIdx.y;
   int colIx = blockIdx.x * blockDim.x + threadIdx.x;
-
   float result = 0;
-  
   for (int tileIx = 0; tileIx < ceil(1.0*numAColumns/TILE_WIDTH); tileIx++) {
-
-    // int col = tileIx*TILE_WIDTH+threadIdx.x;
-    // if (col < numAColumns)
-    //   tileA[threadIdx.y][threadIdx.x] = Kernel[rowIx*numAColumns+col];
-    // else
-    //   tileA[threadIdx.y][threadIdx.x] = 0;
-
-
     int row = tileIx*TILE_WIDTH+threadIdx.y;
     if (row < numAColumns)
       tileB[threadIdx.y][threadIdx.x] = B[row*numCColumns + colIx];
     else 
       tileB[threadIdx.y][threadIdx.x] = 0;
-
-
     __syncthreads();
     for (int k = 0; k < TILE_WIDTH; k++)
       if (tileIx*TILE_WIDTH+k < numAColumns)
         result += Kernel[rowIx*numAColumns+tileIx*TILE_WIDTH+k]*tileB[k][threadIdx.x];
-      
     __syncthreads();   
   }
-  
   if ((rowIx < numCRows) && (colIx < numCColumns)) {
     C[rowIx*numCColumns+colIx] = result;
   }
@@ -125,11 +104,12 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
 
 
     float* X_unrolled;
-    int size = C*K*K*H_out*W_out;
-    cudaMalloc(&X_unrolled, sizeof(float)*size);
-    for (int b = B; b--; ) {
-        unroll(X_unrolled, size, X+b*C*H*W, C, K, H, W);
+    cudaMalloc(&X_unrolled, sizeof(float)*C*K*K*H_out*W_out);
+    int b=B;
+    while(b>0) {
+        unroll(X_unrolled, C*K*K*H_out*W_out, X+b*C*H*W, C, K, H, W);
         gemm(X_unrolled,  Y+b*M*H_out*W_out,  C*K*K,  M,  H_out*W_out);
+        b--;
     }
     cudaFree(X_unrolled);
 
