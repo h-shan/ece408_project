@@ -3,7 +3,7 @@
 
 #define BLOCK_SIZE 1024
 #define TILE_WIDTH 32
-#define KERNEL_SIZE 14112
+#define KERNEL_SIZE 8 * BLOCK_SIZE
 
 #include <mxnet/base.h>
 
@@ -15,7 +15,7 @@ namespace op
 
 __constant__ float Kernel[KERNEL_SIZE];
 
-__global__ void matrixMultiplyShared(float *B, float *C, int numAColumns, int numCRows, int numCColumns) 
+__global__ void matrixMultiplyShared(const float* __restrict__ B, float *C, int numAColumns, int numCRows, int numCColumns) 
 {
   __shared__ float tileB[TILE_WIDTH][TILE_WIDTH];
   int rowIx = blockIdx.y * blockDim.y + threadIdx.y;
@@ -28,6 +28,8 @@ __global__ void matrixMultiplyShared(float *B, float *C, int numAColumns, int nu
     else 
       tileB[threadIdx.y][threadIdx.x] = 0;
     __syncthreads();
+
+    #pragma unroll
     for (int k = 0; k < TILE_WIDTH; k++)
       if (tileIx*TILE_WIDTH+k < numAColumns)
         result += Kernel[rowIx*numAColumns+tileIx*TILE_WIDTH+k]*tileB[k][threadIdx.x];
@@ -42,7 +44,7 @@ __global__ void matrixMultiplyShared(float *B, float *C, int numAColumns, int nu
 }
 
 
-void gemm(float* X_unrolled,  float* Y, int CKK, int M, int HW) {
+void gemm(const float* __restrict__ X_unrolled,  float* Y, int CKK, int M, int HW) {
     // matrixMultiplyShared(float *A, float *B, float *C,
     //                                  int numAColumns, int numCRows, int numCColumns)
     // W_unroll = K
@@ -53,7 +55,7 @@ void gemm(float* X_unrolled,  float* Y, int CKK, int M, int HW) {
 }
 
 
-__global__ void unrollKernel(float* X_unrolled, int size, float* X, int C, int K, int H, int W) {
+__global__ void unrollKernel(float* X_unrolled, int size, const float* __restrict__ X, int C, int K, int H, int W) {
     int ix = blockDim.x*blockIdx.x + threadIdx.x;
     if (ix >= size)
         return;
@@ -70,7 +72,7 @@ __global__ void unrollKernel(float* X_unrolled, int size, float* X, int C, int K
     X_unrolled[ix] = X[(c) * (H * W) + (h+p) * (W) + w+q];
 }
 
-void unroll(float* X_unrolled, int size, float* X, int C, int K, int H, int W) {
+void unroll(float* X_unrolled, int size, const float* __restrict__ X, int C, int K, int H, int W) {
     int gridDim = ceil(1.0*size/BLOCK_SIZE);
     unrollKernel<<<gridDim, BLOCK_SIZE>>>(X_unrolled, size, X, C, K, H, W);
 }
