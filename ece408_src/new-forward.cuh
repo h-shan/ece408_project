@@ -188,7 +188,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   int W_out = W - K + 1;
   int H_out = H - K + 1;
   if (C == 1) {
-    const intTILE_SIZE = 8;
+    const int TILE_SIZE = 8;
     const int Z = ceil((W_out + 0.0) / TILE_SIZE) * ceil((H_out + 0.0)/ TILE_SIZE);
     
     // Set the kernel dimensions
