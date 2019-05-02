@@ -2,7 +2,7 @@
 #define MXNET_OPERATOR_NEW_FORWARD_CUH_
 
 #define BLOCK_SIZE 1024
-#define WIDTH 32
+#define WIDTH 8
 
 #include <mxnet/base.h>
 
@@ -15,34 +15,30 @@ __global__ void matrixMultiplyShared(float *Kernel, float *X, float *Y, int M, i
 {
   __shared__ float BLOCK_M[WIDTH][WIDTH];
   __shared__ float BLOCK_N[WIDTH][WIDTH];
-  int m = blockIdx.y * blockDim.y + threadIdx.y;
+  
+  int row_index = blockIdx.y * blockDim.y + threadIdx.y;
   int col_index = blockIdx.x * blockDim.x + threadIdx.x;
   int z = blockIdx.z;
   Y += z * M * H_out * W_out;
   X += z * C * H * W;
 
   float acc = 0;
-  int numCRows = M; 
-  int index, row, col, q, p, c, w, h;
   for (int i = 0; i < ceil(1.0*C*K*K/WIDTH); i++) {
     int kernelX = i * WIDTH + threadIdx.x;
-    if (kernelX < C*K*K) {
-      BLOCK_M[threadIdx.y][threadIdx.x] = Kernel[m*C*K*K + kernelX];
+    if (row_index< M && kernelX < C*K*K) {
+      BLOCK_M[threadIdx.y][threadIdx.x] = Kernel[row_index*C*K*K+kernelX];  
     } else {
       BLOCK_M[threadIdx.y][threadIdx.x] = 0;
     }
     int kernelY = i * WIDTH + threadIdx.y;
-    if (kernelY < C * K * K) {
-      index = kernelY * numOutputElements + col_index;
-      row = index/(H_out*W_out);
-      col = index%(H_out*W_out);
-      q = row % K;
-      row /= K;
-      p = row % K;
-      c = row / K;
-      w = col % W_out;
-      h = col / W_out;
-      BLOCK_N[threadIdx.y][threadIdx.x] = X[c * (H * W) + (h+p) * (W) + w+q];
+    if (col_index < H_out*W_out && kernelY < C * K * K) {
+      int q = kernelY % K;
+      kernelY /= K;
+      int p = kernelY % K;
+      int c = kernelY/ K;
+      int w = col_index % W_out;
+      int h = col_index / W_out;
+      BLOCK_N[threadIdx.y][threadIdx.x] = X[c*H*W+(h+p)*W+w+q];
     } else {
       BLOCK_N[threadIdx.y][threadIdx.x] = 0;
     }
@@ -53,13 +49,9 @@ __global__ void matrixMultiplyShared(float *Kernel, float *X, float *Y, int M, i
       
     __syncthreads();   
   }
-  if ((m < numCRows) && (col_index < numOutputElements)) {
-    Y[m*numOutputElements+col_index] = acc;
+  if ((row_index< M) && (col_index < numOutputElements)) {
+    Y[row_index*numOutputElements+col_index] = acc;
   }
-}
-int unroll(float* X, int numOutputElements, int col_index) {
-
-  return 0;
 }
 /* 
    This function is called by new-inl.h
@@ -81,16 +73,9 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     float* Y = y.dptr_;
     float* X = x.dptr_;
     float* Kernel = k.dptr_;
-    
-    // int b=B; 
-    // while (b>0) {
-    //   dim3 gridDim (ceil(1.0*H*W/WIDTH), ceil(1.0*M/WIDTH));
-    //   dim3 blockDim (WIDTH, WIDTH);
-    //   matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X+b*C*H*W, Y+b*M*H_out*W_out, M, C, H, W, K, H_out, W_out, H_out*W_out);
-    //   b--;
-    // }
+
     dim3 gridDim (ceil(1.0*H*W/WIDTH), ceil(1.0*M/WIDTH), B);
-    dim3 blockDim (WIDTH, WIDTH);
+    dim3 blockDim (WIDTH, WIDTH,1);
     matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X, Y, M, C, H, W, K, H_out, W_out, H_out*W_out);
 
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
