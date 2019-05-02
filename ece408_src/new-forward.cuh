@@ -17,6 +17,9 @@ __global__ void matrixMultiplyShared(float *Kernel, float *X, float *Y, int M, i
   __shared__ float BLOCK_N[WIDTH][WIDTH];
   int row_index = blockIdx.y * blockDim.y + threadIdx.y;
   int col_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int z = blockIdx.z;
+  Y += z * M * H_out * W_out;
+  X += z * C * H * W;
 
   float acc = 0;
   int numCRows = M; 
@@ -72,16 +75,19 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     float* X = x.dptr_;
     float* Kernel = k.dptr_;
     
-    int b=B; 
-    while (b>0) {
-      dim3 gridDim (ceil(1.0*H*W/WIDTH), ceil(1.0*M/WIDTH));
-      dim3 blockDim (WIDTH, WIDTH);
-      matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X+b*C*H*W, Y+b*M*H_out*W_out, M, C, H, W, K, H_out, W_out, H_out*W_out);
-      b--;
-    }
+    // int b=B; 
+    // while (b>0) {
+    //   dim3 gridDim (ceil(1.0*H*W/WIDTH), ceil(1.0*M/WIDTH));
+    //   dim3 blockDim (WIDTH, WIDTH);
+    //   matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X+b*C*H*W, Y+b*M*H_out*W_out, M, C, H, W, K, H_out, W_out, H_out*W_out);
+    //   b--;
+    // }
+    dim3 gridDim (ceil(1.0*H*W/WIDTH), ceil(1.0*M/WIDTH), B);
+    dim3 blockDim (WIDTH, WIDTH);
+    matrixMultiplyShared<<<gridDim, blockDim>>>(Kernel, X, Y, M, C, H, W, K, H_out, W_out, H_out*W_out);
+      
     // Use MSHADOW_CUDA_CALL to check for CUDA runtime errors.
     MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
-
 }
 
 /* 
