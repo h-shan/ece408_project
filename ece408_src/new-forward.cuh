@@ -13,18 +13,60 @@ namespace op
 {
 
 
-#define TILE_SIZE 8
+#define TILE_SIZE 32
 #define KERNEL_SIZE 5
 #define MAX_NUM_THREADS 1024
-__constant__ float cst_ptr[KERNEL_SIZE * KERNEL_SIZE * 500]; // 50 max number of channels
+
+__global__ void matrixMultiplyShared(float *A, float *B, float *C,
+  int numARows, int numAColumns,
+  int numBRows, int numBColumns,
+  int numCRows, int numCColumns,
+  int ckk, int total_elements, int M
+) {
+  B += blockIdx.z * total_elements * ckk;
+  C += blockIdx.z * M * total_elements;
+  //@@ Insert code to implement matrix multiplication here
+  //@@ You have to use shared memory for this MP
+  __shared__ float subTileM[TILE_SIZE][TILE_SIZE];
+  __shared__ float subTileN[TILE_SIZE][TILE_SIZE];
+  int bx = blockIdx.x; int by = blockIdx.y;
+  int tx = threadIdx.x; int ty = threadIdx.y;
+
+  int row = by * TILE_SIZE + ty;
+  int col = bx * TILE_SIZE + tx;
+
+  int width = numAColumns;
+  float p = 0;
+
+  int numTiles = width/TILE_SIZE;
+  if (row < numCRows || col < numCColumns) {
+    for (int i = 0; i < numTiles; i++) {
+      subTileM[ty][tx] = A[row * numAColumns + i * TILE_SIZE + tx];
+      subTileN[ty][tx] = B[(i * TILE_SIZE + ty) * numBColumns + col];
+      __syncthreads();
+      for (int k = 0; k < TILE_SIZE; k++) {
+        p += subTileM[ty][k] * subTileN[k][tx]; 
+      }
+      __syncthreads();
+    }
+    for (int i = numTiles * TILE_SIZE; i < width; i++) {
+      p += A[row * numAColumns + i] * B[i * numBColumns + col];
+    }
+    if (row < numCRows && col < numCColumns) {
+      C[row * numCColumns + col] = p;
+    }
+  }
+}
 
 __global__ void unroll_Kernel(int C, int H, int W, int K, float *X, float *X_unroll)
 {
+  X += blockIdx.z * H * W * C;
   int c, s, h_out, w_out, h_unroll, w_unroll, w_base, p, q, m;
   int t = blockIdx.x * blockDim.x + threadIdx.x;
   int H_out = H - K + 1;
   int W_out = W - K + 1;
   int total_elements = H_out * W_out;
+  X_unroll += blockIdx.z * C * K * K * total_elements;
 
   #define x3d(i2, i1, i0) X[(i2) * (H * W) + (i1) * (W) + (i0)]
   #define x_unroll2d(i1, i0) X_unroll[total_elements * (i1) + (i0)]
@@ -47,17 +89,17 @@ __global__ void unroll_Kernel(int C, int H, int W, int K, float *X, float *X_unr
   #undef x_unroll2d
 }
 
-void unroll_gpu(int C, int H, int W, int K, float *X, float *X_unroll)
+void unroll_gpu(int C, int H, int W, int K, int N, float *X, float *X_unroll)
 {
   int H_out = H - K + 1;
   int W_out = W - K + 1;
   int num_threads = H_out * W_out;
   int num_blocks = ceil((num_threads * C + 0.0) / (MAX_NUM_THREADS / C * C));
   int num_blocks2 = ceil((H_out * W_out * C + 0.0) / MAX_NUM_THREADS);
-  dim3 gridDim(num_blocks, C, 1);
+  dim3 gridDim(num_blocks, 1, N);
   dim3 blockDim(MAX_NUM_THREADS / C, C, 1);
 
-  unroll_Kernel<<<num_blocks, blockDim>>>(C, H, W, K, X, X_unroll);
+  unroll_Kernel<<<gridDim, blockDim>>>(C, H, W, K, X, X_unroll);
   // unroll_Kernel2<<<gridDim, MAX_NUM_THREADS>>>(C, H, W, K, X, X_unroll);
 }
 
@@ -83,7 +125,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   cublasCreate(&handle);
 
   float *X_unrolled;
-  cudaMalloc((void **) &X_unrolled, ckk * total_elements * sizeof(float));
+  cudaMalloc((void **) &X_unrolled, N * ckk * total_elements * sizeof(float));
 
   int m = M, k = ckk;
   const float alf = 1;
@@ -91,15 +133,26 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   const float *alpha = &alf;
   const float *beta = &bet;
 
-  for (int n=0; n < N; n++) {
-    unroll_gpu(C, H, W, K, x.dptr_ + (H * W * C * n), X_unrolled);
-    cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
-      total_elements, M, ckk, alpha,
-      X_unrolled, total_elements,
-      w.dptr_, ckk,
-      beta,
-      y.dptr_ + (n * M * total_elements), total_elements);
-  }
+  int numARows = M;
+  int numAColumns = ckk;
+  int numBRows = ckk;
+  int numBColumns = total_elements;
+  int numCRows = M;
+  int numCColumns = total_elements;
+
+  unroll_gpu(C, H, W, K, N, x.dptr_, X_unrolled);
+  dim3 dimGrid(ceil(numCColumns/(TILE_SIZE + 0.0)), ceil(numCRows/(TILE_SIZE + 0.0)), N);
+  dim3 dimBlock(TILE_SIZE, TILE_SIZE, 1);
+  matrixMultiplyShared<<<dimGrid, dimBlock>>>(w.dptr_, X_unrolled, y.dptr_, numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns, ckk, total_elements, M);
+
+  // for (int n=0; n < N; n++) {
+  //   cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
+  //     total_elements, M, ckk, alpha,
+  //     X_unrolled + n * ckk * total_elements, total_elements,
+  //     w.dptr_, ckk,
+  //     beta,
+  //     y.dptr_ + (n * M * total_elements), total_elements);
+  // }
   cublasDestroy(handle);
   MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
 }
