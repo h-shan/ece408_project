@@ -11,7 +11,6 @@ namespace op
 {
 
 
-#define TILE_SIZE 8
 #define KERNEL_SIZE 5
 #define MAX_NUM_THREADS 1024
 __constant__ float cst_ptr [KERNEL_SIZE * KERNEL_SIZE * 500]; // 50 max number of channels
@@ -22,6 +21,7 @@ __global__ void matrixMultiplyShared(float *A, float *B, float *C,
   int numCRows, int numCColumns,
   int ckk, int total_elements, int M
 ) {
+  #define TILE_SIZE 16
   B += blockIdx.z * total_elements * ckk;
   C += blockIdx.z * M * total_elements;
   //@@ Insert code to implement matrix multiplication here
@@ -65,10 +65,12 @@ __global__ void matrixMultiplyShared(float *A, float *B, float *C,
       C[row * numCColumns + col] = p;
     }
   }
+  #undef TILE_SIZE
 }
 
 __global__ void forward_kernel(float *y, const float *x, const float *k, const int B, const int M, const int C, const int H, const int W, const int K)
 {
+    #define TILE_SIZE 8
     /*
     Modify this function to implement the forward pass described in Chapter 16.
     We have added an additional dimension to the tensors to support an entire mini-batch
@@ -126,6 +128,7 @@ __global__ void forward_kernel(float *y, const float *x, const float *k, const i
     #undef y4d
     #undef x4d
     #undef k4d
+    #undef TILE_SIZE
 }
 
 __global__ void unroll_Kernel(int C, int H, int W, int K, float *X, float *X_unroll)
@@ -185,6 +188,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   int W_out = W - K + 1;
   int H_out = H - K + 1;
   if (C == 1) {
+    const intTILE_SIZE = 8;
     const int Z = ceil((W_out + 0.0) / TILE_SIZE) * ceil((H_out + 0.0)/ TILE_SIZE);
     
     // Set the kernel dimensions
@@ -196,6 +200,7 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
     // Call the kernel
     forward_kernel<<<gridDim, blockDim, shmem_size>>>(y.dptr_, x.dptr_, w.dptr_, N,M,C,H,W,K);
   } else {
+    const int TILE_SIZE = 16;
     int ckk = C * K * K;
     int total_elements = H_out * W_out;
     float *X_unrolled;
