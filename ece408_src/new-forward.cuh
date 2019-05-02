@@ -4,8 +4,6 @@
 
 #include <mxnet/base.h>
 #include <stdio.h>
-#include <cuda_runtime.h>
-#include "cublas_v2.h"
 
 namespace mxnet
 {
@@ -13,7 +11,7 @@ namespace op
 {
 
 
-#define TILE_SIZE 32
+#define TILE_SIZE 8
 #define KERNEL_SIZE 5
 #define MAX_NUM_THREADS 1024
 
@@ -27,8 +25,10 @@ __global__ void matrixMultiplyShared(float *A, float *B, float *C,
   C += blockIdx.z * M * total_elements;
   //@@ Insert code to implement matrix multiplication here
   //@@ You have to use shared memory for this MP
-  __shared__ float subTileM[TILE_SIZE][TILE_SIZE];
-  __shared__ float subTileN[TILE_SIZE][TILE_SIZE];
+  __shared__ float subTileM1[TILE_SIZE * TILE_SIZE];
+  __shared__ float subTileN1[TILE_SIZE * TILE_SIZE];
+  __shared__ float subTileM2[TILE_SIZE * TILE_SIZE];
+  __shared__ float subTileN2[TILE_SIZE * TILE_SIZE];
   int bx = blockIdx.x; int by = blockIdx.y;
   int tx = threadIdx.x; int ty = threadIdx.y;
 
@@ -39,15 +39,23 @@ __global__ void matrixMultiplyShared(float *A, float *B, float *C,
   float p = 0;
 
   int numTiles = width/TILE_SIZE;
+  float *subTileM, *subTileN;
+
   if (row < numCRows || col < numCColumns) {
     for (int i = 0; i < numTiles; i++) {
-      subTileM[ty][tx] = A[row * numAColumns + i * TILE_SIZE + tx];
-      subTileN[ty][tx] = B[(i * TILE_SIZE + ty) * numBColumns + col];
+      if (i%2) {
+        subTileM = subTileM1;
+        subTileN = subTileN1;
+      } else {
+        subTileM = subTileM2;
+        subTileN = subTileN2;
+      }
+      subTileM[ty * TILE_SIZE + tx] = A[row * numAColumns + i * TILE_SIZE + tx];
+      subTileN[ty * TILE_SIZE + tx] = B[(i * TILE_SIZE + ty) * numBColumns + col];
       __syncthreads();
       for (int k = 0; k < TILE_SIZE; k++) {
-        p += subTileM[ty][k] * subTileN[k][tx]; 
+        p += subTileM[ty * TILE_SIZE + k] * subTileN[k * TILE_SIZE + tx]; 
       }
-      __syncthreads();
     }
     for (int i = numTiles * TILE_SIZE; i < width; i++) {
       p += A[row * numAColumns + i] * B[i * numBColumns + col];
@@ -61,7 +69,7 @@ __global__ void matrixMultiplyShared(float *A, float *B, float *C,
 __global__ void unroll_Kernel(int C, int H, int W, int K, float *X, float *X_unroll)
 {
   X += blockIdx.z * H * W * C;
-  int c, s, h_out, w_out, h_unroll, w_unroll, w_base, p, q, m;
+  int c, h_out, w_out, h_unroll, w_unroll, w_base, p, q;
   int t = blockIdx.x * blockDim.x + threadIdx.x;
   int H_out = H - K + 1;
   int W_out = W - K + 1;
@@ -100,7 +108,6 @@ void unroll_gpu(int C, int H, int W, int K, int N, float *X, float *X_unroll)
   dim3 blockDim(MAX_NUM_THREADS / C, C, 1);
 
   unroll_Kernel<<<gridDim, blockDim>>>(C, H, W, K, X, X_unroll);
-  // unroll_Kernel2<<<gridDim, MAX_NUM_THREADS>>>(C, H, W, K, X, X_unroll);
 }
 
 template <>
@@ -113,25 +120,12 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   const int W = x.shape_[3];  // Output width (x)
   const int K = w.shape_[3];  // Filter Width/Height
 
-  printf("w: %d %d %d %d\n", w.shape_[0], w.shape_[1], w.shape_[2], w.shape_[3]);
-  printf("x: %d %d %d %d\n", x.shape_[0], x.shape_[1], x.shape_[2], x.shape_[3]);
-  printf("y: %d %d %d %d\n", y.shape_[0], y.shape_[1], y.shape_[2], y.shape_[3]);
   int W_out = W - K + 1;
   int H_out = H - K + 1;
   int ckk = C * K * K;
   int total_elements = H_out * W_out;
-  
-  cublasHandle_t handle;
-  cublasCreate(&handle);
-
   float *X_unrolled;
   cudaMalloc((void **) &X_unrolled, N * ckk * total_elements * sizeof(float));
-
-  int m = M, k = ckk;
-  const float alf = 1;
-  const float bet = 0;
-  const float *alpha = &alf;
-  const float *beta = &bet;
 
   int numARows = M;
   int numAColumns = ckk;
@@ -144,17 +138,8 @@ void forward<gpu, float>(mshadow::Tensor<gpu, 4, float> &y, const mshadow::Tenso
   dim3 dimGrid(ceil(numCColumns/(TILE_SIZE + 0.0)), ceil(numCRows/(TILE_SIZE + 0.0)), N);
   dim3 dimBlock(TILE_SIZE, TILE_SIZE, 1);
   matrixMultiplyShared<<<dimGrid, dimBlock>>>(w.dptr_, X_unrolled, y.dptr_, numARows, numAColumns, numBRows, numBColumns, numCRows, numCColumns, ckk, total_elements, M);
-
-  // for (int n=0; n < N; n++) {
-  //   cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
-  //     total_elements, M, ckk, alpha,
-  //     X_unrolled + n * ckk * total_elements, total_elements,
-  //     w.dptr_, ckk,
-  //     beta,
-  //     y.dptr_ + (n * M * total_elements), total_elements);
-  // }
-  cublasDestroy(handle);
   MSHADOW_CUDA_CALL(cudaDeviceSynchronize());
+  cudaFree(X_unrolled);
 }
 
 template <typename gpu, typename DType>
